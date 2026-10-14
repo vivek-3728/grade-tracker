@@ -236,20 +236,22 @@ def load_grades(csv_path=DEFAULT_DATA_PATH):
             except (ValueError, KeyError):
                 continue
     return grades
-def assessment_key(student_id, semester, subject, date):
+def assessment_key(student_id, semester, subject, score, max_score, date, credits):
     """Persistence-layer wrapper around the authoritative identity.
 
     The identity itself lives in grade_tracker.calc.assessment_key (single
     source of truth for both persistence and calculation). This wrapper keeps
-    the flat (student_id, semester, subject, date) call shape used when
-    saving a grade.
+    the flat call shape used when saving a grade.
     """
     return calc_assessment_key(
         {
             "student_id": student_id,
             "semester": semester,
             "subject": subject,
+            "score": score,
+            "max_score": max_score,
             "date": date,
+            "credits": credits,
         }
     )
 
@@ -271,10 +273,12 @@ def save_grade(
     bypass duplicate detection or corrupt the file.
 
     Raises:
-        ValueError: If the assessment (student_id + semester + subject + date)
-            is already recorded.  The file is left unchanged in that case.
+        ValueError: If the exact grade row is already recorded. The file is
+            left unchanged in that case.
     """
-    key = assessment_key(student_id, semester, subject, date)
+    key = assessment_key(
+        student_id, semester, subject, score, max_score, date, credits
+    )
 
     lock_file = _lock_path_for(csv_path)
     with _InterProcessLock(lock_file) as _lock:
@@ -289,7 +293,10 @@ def save_grade(
                 grade["student_id"],
                 grade["semester"],
                 grade["subject"],
+                grade["score"],
+                grade["max_score"],
                 grade["date"],
+                grade["credits"],
             ) == key:
                 raise ValueError(
                     f"assessment already exists for student '{student_id}' "

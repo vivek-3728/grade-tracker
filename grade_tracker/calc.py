@@ -52,12 +52,10 @@ def assessment_key(grade):
     Used by BOTH the calculation layer (SGPA/CGPA dedup) and the persistence
     layer (duplicate rejection on write), so the two can never drift apart.
 
-    A grade row records a result for one student, in one (semester), for one
-    (subject) on one (date). score, max_score, and credits describe the
-    result; they are NOT part of its identity, so a corrected score is still
-    the same assessment. Two rows with the same
-    (student_id, semester, subject, date) therefore describe the same
-    academic record, and repeating one must not be counted twice.
+    The CSV schema has no assessment ID, so every persisted field that can
+    distinguish assessments is part of the identity. In particular, a
+    student can complete multiple assessments for one subject on one date.
+    Only rows that repeat the complete grade are duplicates.
 
     A subject repeated in a *different* semester yields a different key, so
     legitimate retakes are preserved.
@@ -65,7 +63,8 @@ def assessment_key(grade):
     Returns None when the record is malformed, i.e. it has no (non-empty)
     subject and therefore no determinate identity. Callers must then treat
     the record as un-deduplicatable rather than invent an identity for it.
-    score/max_score are deliberately never consulted.
+    Numeric values remain numeric so equivalent values such as ``25`` and
+    ``25.0`` compare equal after CSV loading.
     """
     subject = str(grade.get("subject", "")).strip()
     if not subject:
@@ -75,6 +74,9 @@ def assessment_key(grade):
         str(grade.get("semester", "")).strip(),
         subject.casefold(),
         str(grade.get("date", "")).strip(),
+        grade.get("score"),
+        grade.get("max_score"),
+        _credit(grade),
     )
 
 
@@ -87,9 +89,8 @@ def _dedupe_assessments(grades):
     to SGPA/CGPA, so repeats are collapsed here rather than counted again.
 
     A record with no subject is malformed: it has no identity under the
-    schema, so it is never deduplicated (it is always kept). Inventing an
-    identity from score/max_score would wrongly split a corrected record.
-    Records from different semesters are never collapsed with each other.
+    schema, so it is never deduplicated (it is always kept). Records from
+    different semesters are never collapsed with each other.
     """
     seen = set()
     unique = []
@@ -167,10 +168,9 @@ def letter_grade(score, max_score=100):
 def sgpa(grades, student_id=None, semester=None):
     """Calculates Semester Grade Point Average on a 10.0 scale.
 
-    Each distinct assessment (student_id, semester, subject, date) in the
-    semester contributes exactly once. Duplicate rows for the same assessment
-    — possible in legacy or hand-edited CSV files — are collapsed so a
-    subject cannot be double-counted within one semester.
+    Each distinct assessment in the semester contributes exactly once.
+    Exact duplicate rows — possible in legacy or hand-edited CSV files — are
+    collapsed, while multiple same-subject assessments on one date are kept.
 
     Numerical policy: each grade point is classified from the unrounded
     percentage, weighted grade-point and credit totals are accumulated
@@ -205,8 +205,8 @@ def cgpa(grades, student_id=None):
     Aggregates every distinct assessment across all of the student's
     semesters. A subject repeated in a later semester is a separate
     assessment (a legitimate retake) and is kept; only rows that repeat the
-    same (student_id, semester, subject, date) assessment are collapsed, so
-    duplicate records cannot inflate the CGPA.
+    complete persisted grade are collapsed, so duplicate records cannot
+    inflate the CGPA without discarding same-day assessments.
 
     Numerical policy: same as :func:`sgpa` — unrounded classification,
     unrounded intermediate totals, final result rounded to 2 decimals.
