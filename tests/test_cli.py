@@ -197,7 +197,7 @@ class TestDuplicateDetection(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertEqual(len(self.read_rows()), 2)
 
-    def test_same_subject_and_date_with_different_score_is_accepted(self):
+    def test_corrected_score_same_assessment_is_rejected(self):
         self.run_add(
             self.data_path,
             "S1", "Mathematics", "25", "50", "2026-10-06", "3", "1",
@@ -208,11 +208,11 @@ class TestDuplicateDetection(unittest.TestCase):
             "S1", "Mathematics", "30", "50", "2026-10-06", "3", "1",
         )
 
-        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(code, 2)
+        self.assertIn("assessment already exists", stderr)
         rows = self.read_rows()
-        self.assertEqual(len(rows), 2)
+        self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["score"], "25.0")
-        self.assertEqual(rows[1]["score"], "30.0")
 
     def test_different_subjects_same_date_are_both_accepted(self):
         code, _, stderr = self.run_add(
@@ -334,9 +334,9 @@ class TestDuplicateRecordsLoadedFromCsv(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
-        self.assertIn("Semester 1 (SGPA: 9.0)", stdout)
+        self.assertIn("Semester 1 (SGPA: 9.5)", stdout)
         self.assertIn("Semester 2 (SGPA: 9.0)", stdout)
-        self.assertIn("CGPA: 9.0", stdout)
+        self.assertIn("CGPA: 9.33", stdout)
 
     def test_summary_preserves_retake_in_both_semesters(self):
         self.write_csv([
@@ -356,19 +356,16 @@ class TestDuplicateRecordsLoadedFromCsv(unittest.TestCase):
         from grade_tracker.calc import assessment_key as calc_key
 
         self.assertEqual(
-            cli_key("S1", "1", "Mathematics", 25, 50, "2026-10-06", 3),
+            cli_key("S1", "1", "Mathematics", "2026-10-06"),
             calc_key({
                 "student_id": "S1",
                 "semester": "1",
                 "subject": "Mathematics",
-                "score": 25,
-                "max_score": 50,
                 "date": "2026-10-06",
-                "credits": 3,
             }),
         )
 
-    def test_same_day_different_scores_are_both_in_summary(self):
+    def test_legacy_csv_duplicate_corrected_score_is_collapsed(self):
         self.write_csv([
             "S1,Mathematics,70,100,2025-01-15,3,1\n",
             "S1,Mathematics,95,100,2025-01-15,3,1\n",
@@ -379,7 +376,7 @@ class TestDuplicateRecordsLoadedFromCsv(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual(stderr, "")
-        self.assertIn("Semester 1 (SGPA: 9.0)", stdout)
+        self.assertIn("Semester 1 (SGPA: 8.5)", stdout)
 
 
 class TestSummaryOutputFormat(unittest.TestCase):
